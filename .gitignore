@@ -1,0 +1,76 @@
+# Build directories
+build/
+csharp_build/
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Compiled Object files
+*.o
+*.obj
+*.lo
+*.slo
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.la
+*.lai
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# C# specific
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.cache
+*.csproj.user
+csharp_build/
+
+# Visual Studio / VSCode
+.vs/
+.vscode/
+*.swp
+*.swo
+
+# Calibration files
+*.dat
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log 
+
+# Other
+*.claude*
+ignored/*
