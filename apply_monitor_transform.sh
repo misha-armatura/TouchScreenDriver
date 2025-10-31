@@ -18,15 +18,15 @@ NC='\033[0m' # No Color
 print_usage() {
     echo "Usage: $0 [options]"
     echo "Options:"
-    echo "  -m, --monitor <index>    Monitor index (0 to N-1 for specific monitor, -1=full desktop)"
-    echo "  -d, --device <name>      Device name (optional, auto-detect if not specified)"
+    echo "  -m, --monitor <index>     Monitor index (0 to N-1 for specific monitor, -1=full desktop)"
+    echo "  -d, --device <name>       Device name (optional, auto-detect if not specified)"
     echo "  -n, --dry-run            Show what would be done without executing"
     echo "  -v, --verbose            Verbose output"
     echo "  -h, --help               Show this help"
     echo ""
     echo "Examples:"
     echo "  $0 --monitor 1                    # Map to second monitor"
-    echo "  $0 --monitor 0 --device 'Touch'   # Map specific device to first monitor"
+    echo "  $0 --monitor 0 --device 'Touch'  # Map specific device to first monitor"
     echo "  $0 --monitor -1                   # Map to full desktop (reset)"
 }
 

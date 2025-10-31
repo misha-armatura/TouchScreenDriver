@@ -16,7 +16,6 @@ find_package(Threads REQUIRED)
 # Source files
 set(TOUCH_READER_SOURCES
     src/cpp/touch_reader.cpp
-    src/cpp/ini_parser.cpp
 )
 
 # Header files

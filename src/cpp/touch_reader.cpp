@@ -12,13 +12,6 @@
 #include <dirent.h>
 #include <vector>
 #include <string>
-#include <array>
-#include <algorithm>
-#include <sstream>
-#include <iomanip>
-#include <cctype>
-
-#include "ini_parser.hpp"
 
 // Maximum number of slots to track touches
 #define MAX_SLOTS 10
@@ -70,8 +63,6 @@ public:
     void ClearEvents();
     
     void SetCalibration(int min_x, int max_x, int min_y, int max_y, int screen_width, int screen_height);
-    void SetAffineCalibration(const std::array<double, 6>& matrix, int screen_width, int screen_height);
-    void SetCalibrationMargin(double margin_percent);
     void SetCalibrationOffset(int x_offset, int y_offset);
     Calibration GetCalibration() const;
     bool LoadCalibration(const std::string& filename);
@@ -169,21 +160,18 @@ TouchReaderImpl::TouchReaderImpl() {
     }
     
     // Initialize calibration with defaults
-    calibration_.mode = CalibrationMode::MinMax;
-    calibration_.min_x = static_cast<double>(DEFAULT_MIN_X);
-    calibration_.max_x = static_cast<double>(DEFAULT_MAX_X);
-    calibration_.min_y = static_cast<double>(DEFAULT_MIN_Y);
-    calibration_.max_y = static_cast<double>(DEFAULT_MAX_Y);
+    calibration_.min_x = DEFAULT_MIN_X;
+    calibration_.max_x = DEFAULT_MAX_X;
+    calibration_.min_y = DEFAULT_MIN_Y;
+    calibration_.max_y = DEFAULT_MAX_Y;
     calibration_.screen_width = DEFAULT_SCREEN_WIDTH;
     calibration_.screen_height = DEFAULT_SCREEN_HEIGHT;
     
     // Calculate factors
-    calibration_.x_factor = static_cast<double>(calibration_.screen_width) / std::max(1.0, calibration_.max_x - calibration_.min_x);
-    calibration_.y_factor = static_cast<double>(calibration_.screen_height) / std::max(1.0, calibration_.max_y - calibration_.min_y);
+    calibration_.x_factor = (float)calibration_.screen_width / (calibration_.max_x - calibration_.min_x);
+    calibration_.y_factor = (float)calibration_.screen_height / (calibration_.max_y - calibration_.min_y);
     calibration_.x_offset = 0;
     calibration_.y_offset = 0;
-    calibration_.margin_percent = 0.0;
-    calibration_.affine = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
 }
 
 // Destructor
@@ -193,73 +181,70 @@ TouchReaderImpl::~TouchReaderImpl() {
 
 // Apply calibration to raw touchscreen coordinates
 void TouchReaderImpl::ApplyCalibration(int raw_x, int raw_y, int& x, int& y) {
-    double raw_dx = static_cast<double>(raw_x);
-    double raw_dy = static_cast<double>(raw_y);
-
-    if (calibration_.mode == CalibrationMode::Affine) {
-        double mapped_x = calibration_.affine[0] * raw_dx +
-                          calibration_.affine[1] * raw_dy +
-                          calibration_.affine[2];
-        double mapped_y = calibration_.affine[3] * raw_dx +
-                          calibration_.affine[4] * raw_dy +
-                          calibration_.affine[5];
-
-        mapped_x += static_cast<double>(calibration_.x_offset);
-        mapped_y += static_cast<double>(calibration_.y_offset);
-
-        double min_screen_x = static_cast<double>(calibration_.x_offset);
-        double max_screen_x = min_screen_x + std::max(0, calibration_.screen_width - 1);
-        double min_screen_y = static_cast<double>(calibration_.y_offset);
-        double max_screen_y = min_screen_y + std::max(0, calibration_.screen_height - 1);
-
-        mapped_x = std::clamp(mapped_x, min_screen_x, max_screen_x);
-        mapped_y = std::clamp(mapped_y, min_screen_y, max_screen_y);
-
-        x = static_cast<int>(std::lround(mapped_x));
-        y = static_cast<int>(std::lround(mapped_y));
-        return;
+    // Apply calibration factors with additional safeguards to prevent division by zero
+    float x_factor = calibration_.x_factor;
+    float y_factor = calibration_.y_factor;
+    
+    // Sanity check to avoid division by zero or extreme values
+    if (std::isnan(x_factor) || std::isinf(x_factor) || x_factor == 0) {
+        x_factor = (float)calibration_.screen_width / 4096.0f; // Fallback to full range
+        DEBUG_PRINT("Warning: Invalid x_factor detected, using fallback value: " << x_factor);
     }
-
-    const double min_x = calibration_.min_x;
-    const double max_x = calibration_.max_x;
-    const double min_y = calibration_.min_y;
-    const double max_y = calibration_.max_y;
-
-    double range_x = max_x - min_x;
-    double range_y = max_y - min_y;
-
-    if (range_x <= 0.0) {
-        range_x = 1.0;
+    
+    if (std::isnan(y_factor) || std::isinf(y_factor) || y_factor == 0) {
+        y_factor = (float)calibration_.screen_height / 4096.0f; // Fallback to full range
+        DEBUG_PRINT("Warning: Invalid y_factor detected, using fallback value: " << y_factor);
     }
-    if (range_y <= 0.0) {
-        range_y = 1.0;
+    
+    // Clamp raw values to prevent extreme outliers
+    int clamped_raw_x = raw_x;
+    int clamped_raw_y = raw_y;
+    
+    // Very basic outlier detection - if values are far outside calibration range
+    int x_range = calibration_.max_x - calibration_.min_x;
+    int y_range = calibration_.max_y - calibration_.min_y;
+    
+    // Allow a wider range during calibration
+    bool is_calibrating = calibration_.screen_width == DEFAULT_SCREEN_WIDTH && 
+                         calibration_.screen_height == DEFAULT_SCREEN_HEIGHT;
+
+    if (!is_calibrating) {
+        if (x_range > 0 && (clamped_raw_x < calibration_.min_x - x_range || clamped_raw_x > calibration_.max_x + x_range)) {
+            DEBUG_PRINT("Raw X coordinate " << clamped_raw_x << " is far outside calibration range ["
+                        << calibration_.min_x << ", " << calibration_.max_x << "], clamping");
+            clamped_raw_x = std::max(calibration_.min_x - x_range/4, std::min(clamped_raw_x, calibration_.max_x + x_range/4));
+        }
+        
+        if (y_range > 0 && (clamped_raw_y < calibration_.min_y - y_range || clamped_raw_y > calibration_.max_y + y_range)) {
+            DEBUG_PRINT("Raw Y coordinate " << clamped_raw_y << " is far outside calibration range ["
+                        << calibration_.min_y << ", " << calibration_.max_y << "], clamping");
+            clamped_raw_y = std::max(calibration_.min_y - y_range/4, std::min(clamped_raw_y, calibration_.max_y + y_range/4));
+        }
     }
-
-    double clamped_raw_x = std::clamp(raw_dx, min_x, max_x);
-    double clamped_raw_y = std::clamp(raw_dy, min_y, max_y);
-
-    double u = (clamped_raw_x - min_x) / range_x;
-    double v = (clamped_raw_y - min_y) / range_y;
-
-    u = std::clamp(u, 0.0, 1.0);
-    v = std::clamp(v, 0.0, 1.0);
-
-    double screen_x = u * std::max(0, calibration_.screen_width - 1);
-    double screen_y = v * std::max(0, calibration_.screen_height - 1);
-
-    screen_x += static_cast<double>(calibration_.x_offset);
-    screen_y += static_cast<double>(calibration_.y_offset);
-
-    double min_screen_x = static_cast<double>(calibration_.x_offset);
-    double max_screen_x = min_screen_x + std::max(0, calibration_.screen_width - 1);
-    double min_screen_y = static_cast<double>(calibration_.y_offset);
-    double max_screen_y = min_screen_y + std::max(0, calibration_.screen_height - 1);
-
-    screen_x = std::clamp(screen_x, min_screen_x, max_screen_x);
-    screen_y = std::clamp(screen_y, min_screen_y, max_screen_y);
-
-    x = static_cast<int>(std::lround(screen_x));
-    y = static_cast<int>(std::lround(screen_y));
+    
+    // Apply the calibration with improved scaling and offset handling
+    float x_percent = (float)(clamped_raw_x - calibration_.min_x) / (calibration_.max_x - calibration_.min_x);
+    float y_percent = (float)(clamped_raw_y - calibration_.min_y) / (calibration_.max_y - calibration_.min_y);
+    
+    // Apply percentage scaling first
+    x = (int)(x_percent * (calibration_.screen_width - 1));
+    y = (int)(y_percent * (calibration_.screen_height - 1));
+    
+    // Then apply offset (if any)
+    if (calibration_.x_offset != 0 || calibration_.y_offset != 0) {
+        x = (int)((float)x * (1.0f + calibration_.x_offset / 100.0f));
+        y = (int)((float)y * (1.0f + calibration_.y_offset / 100.0f));
+    }
+    
+    // Debug extreme values
+    if (x < 0 || x >= calibration_.screen_width || y < 0 || y >= calibration_.screen_height) {
+        DEBUG_PRINT("Mapping out of bounds: raw=(" << raw_x << "," << raw_y << ") -> screen=(" 
+                  << x << "," << y << ") [screen=" << calibration_.screen_width << "x" << calibration_.screen_height << "]");
+    }
+    
+    // Clamp to screen boundaries
+    x = std::max(0, std::min(x, calibration_.screen_width - 1));
+    y = std::max(0, std::min(y, calibration_.screen_height - 1));
 }
 
 // Start touch reader with specific device
@@ -339,7 +324,7 @@ void TouchReaderImpl::AddEvent(EventType type, int touch_count, int x, int y, in
     }
 }
 
-// Function for getting all devices from /dev/input
+// Функция для получения списка всех устройств в папке /dev/input
 std::vector<std::string> GetAllInputDevices() {
     std::vector<std::string> devices;
     DIR* dir = opendir("/dev/input");
@@ -351,7 +336,7 @@ std::vector<std::string> GetAllInputDevices() {
     
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
-        // Skip empty names and dots ("." "..")
+        // Пропускаем "." и ".."
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
@@ -372,7 +357,7 @@ bool TouchReaderImpl::StartAuto() {
         return false;
     }
     
-    // Get list of all input devices
+    // Получаем список всех устройств ввода
     std::vector<std::string> all_devices = GetAllInputDevices();
     const int num_devices = all_devices.size();
     
@@ -386,7 +371,7 @@ bool TouchReaderImpl::StartAuto() {
 
     DEBUG_PRINT("Auto-detecting touchscreen device...");
     
-    // Try to open every device and check permissions
+    // Попробуем открыть каждое устройство и проверить разрешения
     for (int i = 0; i < num_devices; ++i) {
         fds[i] = open(all_devices[i].c_str(), O_RDONLY | O_NONBLOCK);
         if (fds[i] < 0) {
@@ -396,12 +381,12 @@ bool TouchReaderImpl::StartAuto() {
         }
     }
 
-    // For the first, check mouse devices, that can be a touchscreen
+    // Сначала попробуем устройства мыши, которые могут быть тачскрином
     for (int i = 0; i < num_devices; ++i) {
         if (fds[i] >= 0 && all_devices[i].find("mouse") != std::string::npos) {
             DEBUG_PRINT("Trying to use mouse device: " << all_devices[i]);
             
-            // Close all others file descriptors
+            // Закрываем все остальные файловые дескрипторы
             for (int j = 0; j < num_devices; ++j) {
                 if (j != i && fds[j] >= 0) {
                     close(fds[j]);
@@ -415,7 +400,7 @@ bool TouchReaderImpl::StartAuto() {
                 return true;
             }
             
-            // If fails, reopen file descriptors again
+            // Если не удалось, открываем файловые дескрипторы заново
             for (int j = 0; j < num_devices; ++j) {
                 if (j != i && fds[j] < 0) {
                     fds[j] = open(all_devices[j].c_str(), O_RDONLY | O_NONBLOCK);
@@ -424,12 +409,12 @@ bool TouchReaderImpl::StartAuto() {
         }
     }
     
-    // Recheck event devices again
+    // Затем проверяем event устройства
     for (int i = 0; i < num_devices; ++i) {
         if (fds[i] >= 0 && all_devices[i].find("event") != std::string::npos) {
             DEBUG_PRINT("Trying to use event device: " << all_devices[i]);
             
-            // Close all others file descriptors
+            // Закрываем все остальные файловые дескрипторы
             for (int j = 0; j < num_devices; ++j) {
                 if (j != i && fds[j] >= 0) {
                     close(fds[j]);
@@ -443,7 +428,7 @@ bool TouchReaderImpl::StartAuto() {
                 return true;
             }
             
-            // If fails, reopen file descriptors again
+            // Если не удалось, открываем файловые дескрипторы заново
             for (int j = 0; j < num_devices; ++j) {
                 if (j != i && fds[j] < 0) {
                     fds[j] = open(all_devices[j].c_str(), O_RDONLY | O_NONBLOCK);
@@ -452,7 +437,7 @@ bool TouchReaderImpl::StartAuto() {
         }
     }
     
-    // Check all other devices
+    // Наконец, проверяем любые другие устройства
     for (int i = 0; i < num_devices; ++i) {
         if (fds[i] >= 0 && 
             all_devices[i].find("mouse") == std::string::npos && 
@@ -460,7 +445,7 @@ bool TouchReaderImpl::StartAuto() {
             
             DEBUG_PRINT("Trying to use other device: " << all_devices[i]);
             
-            // Close all others file descriptors
+            // Закрываем все остальные файловые дескрипторы
             for (int j = 0; j < num_devices; ++j) {
                 if (j != i && fds[j] >= 0) {
                     close(fds[j]);
@@ -476,7 +461,7 @@ bool TouchReaderImpl::StartAuto() {
         }
     }
     
-    // Close all file descriptors
+    // Закрываем все оставшиеся открытые дескрипторы
     for (int i = 0; i < num_devices; ++i) {
         if (fds[i] >= 0) {
             close(fds[i]);
@@ -659,44 +644,16 @@ void TouchReaderImpl::ClearEvents() {
 void TouchReaderImpl::SetCalibration(int min_x, int max_x, int min_y, int max_y, int screen_width, int screen_height) {
     std::lock_guard<std::mutex> lock(touch_mutex_);
     
-    calibration_.mode = CalibrationMode::MinMax;
-    calibration_.min_x = static_cast<double>(min_x);
-    calibration_.max_x = static_cast<double>(max_x);
-    calibration_.min_y = static_cast<double>(min_y);
-    calibration_.max_y = static_cast<double>(max_y);
+    calibration_.min_x = min_x;
+    calibration_.max_x = max_x;
+    calibration_.min_y = min_y;
+    calibration_.max_y = max_y;
     calibration_.screen_width = screen_width;
     calibration_.screen_height = screen_height;
-
-    double range_x = calibration_.max_x - calibration_.min_x;
-    double range_y = calibration_.max_y - calibration_.min_y;
-
-    if (range_x <= 0.0) {
-        range_x = 1.0;
-    }
-    if (range_y <= 0.0) {
-        range_y = 1.0;
-    }
-
-    calibration_.x_factor = static_cast<double>(screen_width) / range_x;
-    calibration_.y_factor = static_cast<double>(screen_height) / range_y;
-    calibration_.margin_percent = 0.0;
-    calibration_.affine = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
-}
-
-void TouchReaderImpl::SetAffineCalibration(const std::array<double, 6>& matrix, int screen_width, int screen_height) {
-    std::lock_guard<std::mutex> lock(touch_mutex_);
-
-    calibration_.mode = CalibrationMode::Affine;
-    calibration_.affine = matrix;
+    
+    // Store screen dimensions
     calibration_.screen_width = screen_width;
     calibration_.screen_height = screen_height;
-    calibration_.x_factor = 1.0;
-    calibration_.y_factor = 1.0;
-}
-
-void TouchReaderImpl::SetCalibrationMargin(double margin_percent) {
-    std::lock_guard<std::mutex> lock(touch_mutex_);
-    calibration_.margin_percent = margin_percent;
 }
 
 // Set calibration offsets
@@ -713,136 +670,37 @@ Calibration TouchReaderImpl::GetCalibration() const {
 
 // Load calibration from file
 bool TouchReaderImpl::LoadCalibration(const std::string& filename) {
-    Config::IniData data;
-    if (Config::LoadIni(filename, data)) {
-        auto get_double = [](const std::optional<std::string>& value, double fallback) {
-            if (!value) return fallback;
-            try {
-                return std::stod(*value);
-            } catch (...) {
-                return fallback;
-            }
-        };
-        auto get_int = [](const std::optional<std::string>& value, int fallback) {
-            if (!value) return fallback;
-            try {
-                return std::stoi(*value);
-            } catch (...) {
-                return fallback;
-            }
-        };
-
-        auto mode_str = Config::GetValue(data, "Calibration", "mode").value_or("minmax");
-        std::string mode_lower = mode_str;
-        std::transform(mode_lower.begin(), mode_lower.end(), mode_lower.begin(), [](unsigned char c) { return std::tolower(c); });
-
-        int screen_width = get_int(Config::GetValue(data, "Calibration", "screen_width"), calibration_.screen_width);
-        int screen_height = get_int(Config::GetValue(data, "Calibration", "screen_height"), calibration_.screen_height);
-        int offset_x = get_int(Config::GetValue(data, "Calibration", "offset_x"), 0);
-        int offset_y = get_int(Config::GetValue(data, "Calibration", "offset_y"), 0);
-        double margin = get_double(Config::GetValue(data, "Calibration", "margin_percent"), 0.0);
-
-        if (mode_lower == "affine") {
-            std::array<double, 6> matrix{
-                get_double(Config::GetValue(data, "Affine", "m0"), calibration_.affine[0]),
-                get_double(Config::GetValue(data, "Affine", "m1"), calibration_.affine[1]),
-                get_double(Config::GetValue(data, "Affine", "m2"), calibration_.affine[2]),
-                get_double(Config::GetValue(data, "Affine", "m3"), calibration_.affine[3]),
-                get_double(Config::GetValue(data, "Affine", "m4"), calibration_.affine[4]),
-                get_double(Config::GetValue(data, "Affine", "m5"), calibration_.affine[5])
-            };
-
-            SetAffineCalibration(matrix, screen_width, screen_height);
-            calibration_.x_offset = offset_x;
-            calibration_.y_offset = offset_y;
-            calibration_.margin_percent = margin;
-            return true;
-        }
-
-        // Default to min/max mode
-        double min_x = get_double(Config::GetValue(data, "Calibration", "min_x"), calibration_.min_x);
-        double max_x = get_double(Config::GetValue(data, "Calibration", "max_x"), calibration_.max_x);
-        double min_y = get_double(Config::GetValue(data, "Calibration", "min_y"), calibration_.min_y);
-        double max_y = get_double(Config::GetValue(data, "Calibration", "max_y"), calibration_.max_y);
-
-        SetCalibration(static_cast<int>(std::lround(min_x)), static_cast<int>(std::lround(max_x)),
-                       static_cast<int>(std::lround(min_y)), static_cast<int>(std::lround(max_y)),
-                       screen_width, screen_height);
-
-        // Preserve precise values
-        calibration_.min_x = min_x;
-        calibration_.max_x = max_x;
-        calibration_.min_y = min_y;
-        calibration_.max_y = max_y;
-        calibration_.x_offset = offset_x;
-        calibration_.y_offset = offset_y;
-        calibration_.margin_percent = margin;
-
-        double range_x = calibration_.max_x - calibration_.min_x;
-        double range_y = calibration_.max_y - calibration_.min_y;
-        if (range_x <= 0.0) range_x = 1.0;
-        if (range_y <= 0.0) range_y = 1.0;
-        calibration_.x_factor = static_cast<double>(screen_width) / range_x;
-        calibration_.y_factor = static_cast<double>(screen_height) / range_y;
-
-        return true;
-    }
-
-    // Legacy plain format fallback
     FILE* f = fopen(filename.c_str(), "r");
-    if (!f) {
-        return false;
-    }
-
+    if (!f) return false;
+    
     int min_x, max_x, min_y, max_y, screen_width, screen_height, x_offset, y_offset;
-    if (fscanf(f, "%d %d %d %d %d %d %d %d",
-               &min_x, &max_x, &min_y, &max_y,
-               &screen_width, &screen_height,
+    if (fscanf(f, "%d %d %d %d %d %d %d %d", 
+               &min_x, &max_x, &min_y, &max_y, 
+               &screen_width, &screen_height, 
                &x_offset, &y_offset) == 8) {
-        fclose(f);
         SetCalibration(min_x, max_x, min_y, max_y, screen_width, screen_height);
         SetCalibrationOffset(x_offset, y_offset);
+        fclose(f);
         return true;
     }
-
+    
     fclose(f);
     return false;
 }
 
 // Save calibration to file
 bool TouchReaderImpl::SaveCalibration(const std::string& filename) {
-    Config::IniData data;
-    auto to_string_precise = [](double value) {
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(6) << value;
-        return oss.str();
-    };
-
-    Config::SetValue(data, "Calibration", "mode",
-        calibration_.mode == CalibrationMode::Affine ? "affine" : "minmax");
-    Config::SetValue(data, "Calibration", "min_x", to_string_precise(calibration_.min_x));
-    Config::SetValue(data, "Calibration", "max_x", to_string_precise(calibration_.max_x));
-    Config::SetValue(data, "Calibration", "min_y", to_string_precise(calibration_.min_y));
-    Config::SetValue(data, "Calibration", "max_y", to_string_precise(calibration_.max_y));
-    Config::SetValue(data, "Calibration", "screen_width", std::to_string(calibration_.screen_width));
-    Config::SetValue(data, "Calibration", "screen_height", std::to_string(calibration_.screen_height));
-    Config::SetValue(data, "Calibration", "offset_x", std::to_string(calibration_.x_offset));
-    Config::SetValue(data, "Calibration", "offset_y", std::to_string(calibration_.y_offset));
-    Config::SetValue(data, "Calibration", "margin_percent", to_string_precise(calibration_.margin_percent));
-
-    if (calibration_.mode == CalibrationMode::Affine) {
-        Config::SetValue(data, "Affine", "m0", to_string_precise(calibration_.affine[0]));
-        Config::SetValue(data, "Affine", "m1", to_string_precise(calibration_.affine[1]));
-        Config::SetValue(data, "Affine", "m2", to_string_precise(calibration_.affine[2]));
-        Config::SetValue(data, "Affine", "m3", to_string_precise(calibration_.affine[3]));
-        Config::SetValue(data, "Affine", "m4", to_string_precise(calibration_.affine[4]));
-        Config::SetValue(data, "Affine", "m5", to_string_precise(calibration_.affine[5]));
-    }
-
-    // Metadata for debugging
-    Config::SetValue(data, "Metadata", "saved_with", "touch_reader");
-
-    return Config::SaveIni(filename, data);
+    FILE* f = fopen(filename.c_str(), "w");
+    if (!f) return false;
+    
+    fprintf(f, "%d %d %d %d %d %d %d %d", 
+            calibration_.min_x, calibration_.max_x, 
+            calibration_.min_y, calibration_.max_y,
+            calibration_.screen_width, calibration_.screen_height,
+            calibration_.x_offset, calibration_.y_offset);
+    
+    fclose(f);
+    return true;
 }
 
 // Get the selected device name
@@ -1294,10 +1152,10 @@ bool TouchReaderImpl::RunCalibration(int screen_width, int screen_height) {
     // Create arrays to store the calibration points
     int points[4][2] = {{0}};  // Will store raw touch points
     int targets[4][2] = {
-        {20, 20},                                   // Top-left
-        {screen_width - 20, 20},                    // Top-right
-        {screen_width - 20, screen_height - 20},    // Bottom-right
-        {20, screen_height - 20}                    // Bottom-left
+        {20, 20},                          // Top-left
+        {screen_width - 20, 20},           // Top-right
+        {screen_width - 20, screen_height - 20},  // Bottom-right
+        {20, screen_height - 20}           // Bottom-left
     };
     
     printf("Starting touch screen calibration...\n");
@@ -1449,14 +1307,6 @@ void TouchReader::ClearEvents() {
 
 void TouchReader::SetCalibration(int min_x, int max_x, int min_y, int max_y, int screen_width, int screen_height) {
     impl_->SetCalibration(min_x, max_x, min_y, max_y, screen_width, screen_height);
-}
-
-void TouchReader::SetAffineCalibration(const std::array<double, 6>& matrix, int screen_width, int screen_height) {
-    impl_->SetAffineCalibration(matrix, screen_width, screen_height);
-}
-
-void TouchReader::SetCalibrationMargin(double margin_percent) {
-    impl_->SetCalibrationMargin(margin_percent);
 }
 
 void TouchReader::SetCalibrationOffset(int x_offset, int y_offset) {
@@ -1659,23 +1509,6 @@ void touch_reader_set_calibration(TouchReaderHandle handle, int min_x, int max_x
     }
 }
 
-void touch_reader_set_calibration_margin(TouchReaderHandle handle, double margin_percent) {
-    if (handle) {
-        handle->reader->SetCalibrationMargin(margin_percent);
-    }
-}
-
-void touch_reader_set_affine_calibration(TouchReaderHandle handle, const double* matrix, int screen_width, int screen_height) {
-    if (!handle || !matrix) {
-        return;
-    }
-    std::array<double, 6> affine{};
-    for (size_t i = 0; i < affine.size(); ++i) {
-        affine[i] = matrix[i];
-    }
-    handle->reader->SetAffineCalibration(affine, screen_width, screen_height);
-}
-
 void touch_reader_set_calibration_offset(TouchReaderHandle handle, int x_offset, int y_offset) {
     if (handle) {
         handle->reader->SetCalibrationOffset(x_offset, y_offset);
@@ -1685,10 +1518,10 @@ void touch_reader_set_calibration_offset(TouchReaderHandle handle, int x_offset,
 void touch_reader_get_calibration(TouchReaderHandle handle, int* min_x, int* max_x, int* min_y, int* max_y) {
     if (handle && min_x && max_x && min_y && max_y) {
         auto calibration = handle->reader->GetCalibration();
-        *min_x = static_cast<int>(std::lround(calibration.min_x));
-        *max_x = static_cast<int>(std::lround(calibration.max_x));
-        *min_y = static_cast<int>(std::lround(calibration.min_y));
-        *max_y = static_cast<int>(std::lround(calibration.max_y));
+        *min_x = calibration.min_x;
+        *max_x = calibration.max_x;
+        *min_y = calibration.min_y;
+        *max_y = calibration.max_y;
     }
 }
 

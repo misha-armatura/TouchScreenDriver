@@ -36,12 +36,6 @@ namespace TouchScreenLib
         public static extern void touch_reader_set_calibration(IntPtr handle, int min_x, int max_x, int min_y, int max_y, int screen_width, int screen_height);
 
         [DllImport(LibraryName)]
-        public static extern void touch_reader_set_calibration_margin(IntPtr handle, double margin_percent);
-
-        [DllImport(LibraryName)]
-        public static extern void touch_reader_set_affine_calibration(IntPtr handle, double[] matrix, int screen_width, int screen_height);
-
-        [DllImport(LibraryName)]
         public static extern int touch_reader_run_calibration(IntPtr handle, int screen_width, int screen_height);
 
         [DllImport(LibraryName)]
@@ -100,19 +94,6 @@ namespace TouchScreenLib
             
             // Apply calibration directly
             TouchReaderNative.touch_reader_set_calibration(_handle, minX, maxX, minY, maxY, screenWidth, screenHeight);
-        }
-
-        public void SetCalibrationMargin(double marginPercent)
-        {
-            if (_disposed) throw new ObjectDisposedException(nameof(TouchReader));
-            TouchReaderNative.touch_reader_set_calibration_margin(_handle, marginPercent);
-        }
-
-        public void SetAffineCalibration(double[] matrix, int screenWidth, int screenHeight)
-        {
-            if (_disposed) throw new ObjectDisposedException(nameof(TouchReader));
-            if (matrix.Length != 6) throw new ArgumentException("Affine matrix must contain 6 elements.");
-            TouchReaderNative.touch_reader_set_affine_calibration(_handle, matrix, screenWidth, screenHeight);
         }
 
         public bool RunCalibration(int screenWidth, int screenHeight)
@@ -184,16 +165,6 @@ namespace TouchScreenLib
         public void SetCalibration(int minX, int maxX, int minY, int maxY, int screenWidth, int screenHeight)
         {
             _touchReader.SetCalibration(minX, maxX, minY, maxY, screenWidth, screenHeight);
-        }
-
-        public void SetCalibrationMargin(double marginPercent)
-        {
-            _touchReader.SetCalibrationMargin(marginPercent);
-        }
-
-        public void SetAffineCalibration(double[] matrix, int screenWidth, int screenHeight)
-        {
-            _touchReader.SetAffineCalibration(matrix, screenWidth, screenHeight);
         }
 
         public bool RunCalibration(int screenWidth, int screenHeight)
