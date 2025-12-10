@@ -1,0 +1,96 @@
+TOUCHSCREEN TEST COMMANDS
+=======================
+
+1. BUILD PROJECT
+---------------
+./build.sh --clean
+
+2. FIND YOUR DEVICE ID
+---------------------
+xinput list
+# Find your touchscreen device ID (look for "touchscreen", "FTSC", "ELAN", etc.)
+
+3. TEST C++ APPLICATION
+----------------------
+# Basic test with device ID
+cd build/bin
+./touch_test --device-id 14
+
+# Test with calibration
+./touch_test --device-id 14 --calibrate --resolution 1920x1080
+
+# Test with specific monitor
+./touch_test --device-id 14 --calibrate --monitor 1 --resolution 1920x1080
+
+# Load saved calibration
+./touch_test --device-id 14 --load --monitor 1
+
+4. TEST C# APPLICATION
+---------------------
+# Basic test with device ID
+cd build/csharp
+dotnet TouchScreenExample.dll --device-id 14
+
+# Test with calibration
+dotnet TouchScreenExample.dll --device-id 14 --calibrate --resolution 1920x1080
+
+# Test with specific monitor
+dotnet TouchScreenExample.dll --device-id 14 --calibrate --monitor 1 --resolution 1920x1080
+
+# Load saved calibration
+dotnet TouchScreenExample.dll --device-id 14 --load --monitor 1
+
+5. MONITOR MAPPING COMMANDS
+--------------------------
+# Map touch to left monitor
+./apply_monitor_transform.sh --monitor 0
+
+# Map touch to center monitor
+./apply_monitor_transform.sh --monitor 1
+
+# Map touch to right monitor
+./apply_monitor_transform.sh --monitor 2
+
+# Reset to full desktop
+./apply_monitor_transform.sh --reset
+
+# Check current mapping
+./apply_monitor_transform.sh --status
+
+6. CALIBRATION FILES LOCATION
+----------------------------
+- Full desktop: build/bin/touch_calibration.ini
+- Left monitor: build/bin/touch_calibration_mon0.ini
+- Center monitor: build/bin/touch_calibration_mon1.ini
+- Right monitor: build/bin/touch_calibration_mon2.ini
+
+7. COMMAND OPTIONS
+----------------
+--device-id <id>           Use specific device ID
+--calibrate               Run calibration procedure
+--load                    Load saved calibration
+--monitor <num>           Select monitor (-1=full, 0=left, 1=center, 2=right)
+--resolution <w>x<h>      Set screen resolution (e.g., 1920x1080)
+
+8. TEST FLOW EXAMPLE
+------------------
+1. Build:
+   ./build.sh --clean
+
+2. Get device ID:
+   xinput list
+
+3. Test C++ basic:
+   cd build/bin
+   ./touch_test --device-id 14
+
+4. Calibrate for center monitor:
+   ./apply_monitor_transform.sh --monitor 1
+   ./touch_test --device-id 14 --calibrate --monitor 1 --resolution 1920x1080
+
+5. Test C# with calibration:
+   cd ../csharp
+   dotnet TouchScreenExample.dll --device-id 14 --load --monitor 1
+
+6. Reset when done:
+   ../../apply_monitor_transform.sh --reset

@@ -10,16 +10,8 @@
 #include <atomic>
 #include <condition_variable>
 #include <queue>
-#include <array>
 
 namespace TouchScreen {
-
-// Calibration modes supported by the library
-enum class CalibrationMode {
-    None = 0,
-    MinMax,
-    Affine
-};
 
 // Event types that can be returned by the library
 enum class EventType {
@@ -42,7 +34,7 @@ struct TouchPoint {
     int tracking_id;
     int raw_x;
     int raw_y;
-    int x;        // Calibrated coordinates
+    int x;  // Calibrated coordinates
     int y;
     int start_x;  // For gesture detection
     int start_y;
@@ -53,30 +45,27 @@ struct TouchPoint {
 struct TouchEvent {
     EventType type;
     int touch_count;
-    int x;          // Primary x coordinate
-    int y;          // Primary y coordinate
+    int x;  // Primary x coordinate
+    int y;  // Primary y coordinate
     int raw_x;
     int raw_y;
-    int value;      // Additional value (like pinch distance)
+    int value;  // Additional value (like pinch distance)
     std::vector<TouchPoint> touches;
     int64_t timestamp;
 };
 
 // Calibration structure
 struct Calibration {
-    CalibrationMode mode = CalibrationMode::MinMax;
-    double min_x = 0.0;
-    double max_x = 4096.0;
-    double min_y = 0.0;
-    double max_y = 4096.0;
-    int screen_width = 800;
-    int screen_height = 480;
-    double x_factor = 1.0;
-    double y_factor = 1.0;
-    int x_offset = 0;
-    int y_offset = 0;
-    double margin_percent = 0.0;
-    std::array<double, 6> affine{1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+    int min_x;
+    int max_x;
+    int min_y;
+    int max_y;
+    int screen_width;
+    int screen_height;
+    float x_factor;
+    float y_factor;
+    int x_offset;
+    int y_offset;
 };
 
 // Event callback type
@@ -132,11 +121,9 @@ public:
     
     // Clear all pending events
     void ClearEvents();
-
+    
     // Calibration methods
     void SetCalibration(int min_x, int max_x, int min_y, int max_y, int screen_width, int screen_height);
-    void SetAffineCalibration(const std::array<double, 6>& matrix, int screen_width, int screen_height);
-    void SetCalibrationMargin(double margin_percent);
     void SetCalibrationOffset(int x_offset, int y_offset);
     Calibration GetCalibration() const;
     bool LoadCalibration(const std::string& filename);
@@ -195,10 +182,8 @@ extern "C" {
     
     // Calibration functions
     void touch_reader_set_calibration(TouchReaderHandle handle, int min_x, int max_x, int min_y, int max_y, int screen_width, int screen_height);
-    void touch_reader_set_calibration_margin(TouchReaderHandle handle, double margin_percent);
     void touch_reader_set_calibration_offset(TouchReaderHandle handle, int x_offset, int y_offset);
     void touch_reader_get_calibration(TouchReaderHandle handle, int* min_x, int* max_x, int* min_y, int* max_y);
-    void touch_reader_set_affine_calibration(TouchReaderHandle handle, const double* matrix, int screen_width, int screen_height);
     int touch_reader_load_calibration(TouchReaderHandle handle, const char* filename);
     int touch_reader_save_calibration(TouchReaderHandle handle, const char* filename);
     int touch_reader_run_calibration(TouchReaderHandle handle, int screen_width, int screen_height);
